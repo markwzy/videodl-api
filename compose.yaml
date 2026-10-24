@@ -1,0 +1,17 @@
+services:
+  videodl-api:
+    build: .
+    container_name: videodl-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"  # Access from your Mac ONLY; do not expose to the Internet
+    environment:
+      PARSE_TIMEOUT: "90"
+      # 默认只启用专用解析器；主动改为星号才会启用可能向第三方发送链接的通用解析器。
+      VIDEO_SOURCES: "DouyinVideoClient,BilibiliVideoClient,RednoteVideoClient,KuaishouVideoClient,YouTubeVideoClient,WeiboVideoClient,XiguaVideoClient,ZhihuVideoClient,TencentVideoClient,YoukuVideoClient,TwitterVideoClient"
+    shm_size: "256m"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1500m

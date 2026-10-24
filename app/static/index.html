@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VideoDL · 视频链接解析</title>
+  <style>
+    :root { font-family: -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; color:#e8eef8; color-scheme:dark; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(circle at 50% 0%,#1e3351 0%,#101926 43%,#0c131d 100%); }
+    .container { max-width:850px; padding:72px 22px 60px; margin:0 auto; }
+    .eyebrow { color:#87afd7; text-transform:uppercase; letter-spacing:3px; font-size:12px; font-weight:700; }
+    h1 { font-size:clamp(27px,5vw,42px); letter-spacing:-.9px; margin:12px 0 14px; }
+    p { color:#acbfd4; line-height:1.75; }
+    .panel,.result { background:#142033ee; border:1px solid #2a425c; border-radius:16px; padding:24px; box-shadow:0 14px 40px #0002; }
+    .panel { margin-top:32px; }
+    label { display:block; color:#c5d6eb; font-size:14px; font-weight:600; margin-bottom:12px; }
+    textarea { width:100%; min-height:132px; resize:vertical; padding:15px; border:1px solid #37506b; border-radius:10px; background:#0d1726; color:#f4f7fa; font:14px/1.6 inherit; outline:none; }
+    textarea:focus { border-color:#64a8f0; box-shadow:0 0 0 3px #5585b82c; }
+    .actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:15px; }
+    button { background:#57a7f5; color:#071626; border:none; border-radius:9px; padding:11px 23px; cursor:pointer; font-weight:700; font-size:14px; }
+    button:hover { background:#79bafa; }
+    button:disabled { cursor:wait; opacity:.7; }
+    .secondary { background:#2c4059; color:#dbe9f8; }
+    .secondary:hover { background:#3b5370; }
+    .hint { color:#809ab8; font-size:12px; }
+    #message { margin-top:20px; padding:13px 16px; border-radius:9px; border:1px solid #33526d; background:#192c41; display:none; color:#bfddff; }
+    #message.error { color:#ffd0cf; border-color:#7b3945; background:#351b2b; }
+    #results { display:grid; gap:15px; margin-top:20px; }
+    .result { display:grid; gap:16px; grid-template-columns:120px minmax(0,1fr); }
+    .cover { width:120px; height:120px; border-radius:9px; object-fit:cover; background:#213851; }
+    .placeholder { display:grid; place-items:center; color:#6389b3; font-size:30px; }
+    .title { margin:0 0 4px; font-size:17px; overflow-wrap:anywhere; }
+    .meta { color:#8daac9; font-size:12px; margin-bottom:12px; }
+    .url { color:#8bc3fc; padding:10px; background:#0c1624; border:1px solid #243d56; border-radius:8px; overflow-wrap:anywhere; font-size:12px; line-height:1.55; max-height:96px; overflow:auto; }
+    .inline-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .inline-actions button { font-size:12px; padding:7px 12px; }
+    .download { display:inline-block; background:#57a7f5; color:#071626; border-radius:9px; padding:10px 18px; font-size:14px; font-weight:700; text-decoration:none; margin-bottom:12px; }
+    a { color:#9cccff; }
+    .note { font-size:12px; color:#9ab0ca; margin:12px 0 0; }
+    .footer { margin-top:26px; font-size:12px; color:#788fab; }
+    code { background:#1c3048; color:#b6dafe; padding:2px 5px; border-radius:4px; }
+    @media (max-width:560px) { .container{padding-top:44px} .panel{padding:18px} .result{grid-template-columns:1fr}.cover{width:100%;height:160px} }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <div class="eyebrow">VideoDL / Local Parser</div>
+    <h1>视频链接解析</h1>
+    <p>复制抖音、X / Twitter、小红书、B 站等平台的分享文案或视频 URL，粘贴后提交。解析结果会显示媒体地址，支持一键复制。适合自己保存有权下载的内容。</p>
+    <section class="panel">
+      <label for="share">分享文案 / 视频链接</label>
+      <textarea id="share" placeholder="例如：分享一个视频 https://www.bilibili.com/video/BV... 复制此链接打开"></textarea>
+      <div class="actions">
+        <button id="submit">开始解析</button>
+        <button id="clear" class="secondary">清空</button>
+        <span class="hint">抖音、X 支持直接下载，服务器不保存视频</span>
+      </div>
+    </section>
+    <div id="message" role="status" aria-live="polite"></div>
+    <div id="results" aria-live="polite"></div>
+    <p class="footer">API：<a href="/docs" target="_blank" rel="noopener noreferrer">Swagger /docs</a> · <code>POST /api/parse</code> · 直链可能过期，m3u8 或音视频分离需专用下载器。</p>
+  </main>
+<script>
+  const share = document.getElementById('share');
+  const submit = document.getElementById('submit');
+  const clear = document.getElementById('clear');
+  const message = document.getElementById('message');
+  const results = document.getElementById('results');
+
+  function showMessage(text, isError = false) {
+    message.textContent = text;
+    message.className = isError ? 'error' : '';
+    message.style.display = 'block';
+  }
+  function node(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+  async function copyValue(value, button) {
+    try {
+      await navigator.clipboard.writeText(value);
+      button.textContent = '已复制';
+      setTimeout(() => button.textContent = '复制链接', 1300);
+    } catch (_) {
+      showMessage('浏览器无法复制，请手动选中地址复制', true);
+    }
+  }
+  function linkRow(container, label, url, canOpen = true) {
+    if (!url) return;
+    container.appendChild(node('div', 'meta', label));
+    container.appendChild(node('div', 'url', url));
+    const row = node('div', 'inline-actions');
+    const copy = node('button', '', '复制链接');
+    copy.addEventListener('click', () => copyValue(url, copy));
+    row.appendChild(copy);
+    if (canOpen && /^https?:\/\//i.test(url)) {
+      const open = node('a', '', '新标签页打开');
+      open.href = url;
+      open.target = '_blank';
+      open.rel = 'noopener noreferrer';
+      open.style.alignSelf = 'center';
+      open.style.fontSize = '12px';
+      row.appendChild(open);
+    }
+    container.appendChild(row);
+  }
+  function render(items) {
+    results.replaceChildren();
+    for (const item of items) {
+      const card = node('article', 'result');
+      if (item.cover_url && /^https?:\/\//.test(item.cover_url)) {
+        const img = node('img', 'cover');
+        img.src = item.cover_url;
+        img.loading = 'lazy';
+        img.referrerPolicy = 'no-referrer';
+        img.alt = '视频封面';
+        card.appendChild(img);
+      } else {
+        card.appendChild(node('div', 'cover placeholder', '▶'));
+      }
+      const content = node('div');
+      content.appendChild(node('h3', 'title', item.title));
+      content.appendChild(node('div', 'meta', [item.source, item.ext && item.ext.toUpperCase()].filter(Boolean).join(' · ')));
+      if (item.local_download_url) {
+        const actions = node('div', 'inline-actions');
+        const download = node('a', 'download', '下载视频');
+        download.href = item.local_download_url;
+        download.setAttribute('download', '');
+        download.target = '_blank';
+        download.rel = 'noopener noreferrer';
+        actions.appendChild(download);
+        content.appendChild(actions);
+        content.appendChild(node('p', 'note', '请使用“下载视频”保存文件。下方原始地址直接打开可能被站点拒绝；下载入口 10 分钟内有效。'));
+      }
+      linkRow(content, '原始视频 / 媒体地址', item.download_url, !item.may_require_headers);
+      linkRow(content, '独立音频地址', item.audio_download_url, !item.may_require_headers);
+      if (item.requires_merge) content.appendChild(node('p', 'note', '此视频的音频和画面分离，需用 ffmpeg 等工具合并。'));
+      if (item.is_hls) content.appendChild(node('p', 'note', '检测到 HLS / m3u8 播放列表，不是单个 MP4 文件。'));
+      if (item.may_require_headers) content.appendChild(node('p', 'note', '下载可能需要平台 Referer、User-Agent 或登录凭证；单独复制 URL 不一定能直接使用。'));
+      card.appendChild(content);
+      results.appendChild(card);
+    }
+  }
+  submit.addEventListener('click', async () => {
+    const text = share.value.trim();
+    if (!text) return showMessage('请先粘贴分享文案或网址', true);
+    submit.disabled = true;
+    submit.textContent = '解析中…';
+    results.replaceChildren();
+    showMessage('正在调用解析器，某些网站需要较长时间…');
+    try {
+      const resp = await fetch('/api/parse', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({text})
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw Error(typeof data.detail === 'string' ? data.detail : '请求失败');
+      showMessage(`${data.message}${data.success ? '，共 ' + data.count + ' 条媒体信息' : ''}`, !data.success);
+      render(data.items || []);
+    } catch (err) { showMessage(err.message || '请求失败，请查看 Docker 日志', true); }
+    finally { submit.disabled = false; submit.textContent = '开始解析'; }
+  });
+  clear.addEventListener('click', () => { share.value = ''; results.replaceChildren(); message.style.display='none'; share.focus(); });
+</script>
+</body>
+</html>

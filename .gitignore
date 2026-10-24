@@ -1,0 +1,7 @@
+/.secrets/
+/.env
+/.env.*
+/compose.override.yaml
+__pycache__/
+.pytest_cache/
+.venv/
