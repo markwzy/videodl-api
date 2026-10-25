@@ -26,6 +26,7 @@ class ParseJob:
     result: dict | None = None
     error: dict | None = None
     queue_timer: asyncio.TimerHandle | None = None
+    done: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class ParseJobs:
@@ -84,6 +85,17 @@ class ParseJobs:
             raise HTTPException(status_code=404, detail="解析任务不存在或已过期，请重新解析")
         return self._snapshot(self._jobs[job_id])
 
+    async def wait(self, job_id: str) -> dict:
+        self._prune()
+        if job_id not in self._jobs:
+            raise HTTPException(status_code=404, detail="解析任务不存在或已过期，请重新解析")
+        job = self._jobs[job_id]
+        # 只等待状态通知，连接取消不能取消共享解析；持有任务引用也避免结果被容量清理后丢失。
+        await job.done.wait()
+        if job.error:
+            raise HTTPException(status_code=job.error["status_code"], detail=job.error["detail"])
+        return job.result
+
     def _snapshot(self, job: ParseJob) -> dict:
         position = list(self._queues[job.lane]).index(job) + 1 if job.status == "queued" else None
         return {
@@ -97,6 +109,7 @@ class ParseJobs:
         job.status = "failed"
         job.finished_at = time.time()
         job.error = {"status_code": code, "detail": detail}
+        job.done.set()
 
     def _remember(self, job: ParseJob) -> None:
         self._active.pop(job.key, None)
@@ -156,6 +169,7 @@ class ParseJobs:
             }
             job.status = "succeeded"
             job.finished_at = time.time()
+            job.done.set()
         except HTTPException as exc:
             self._fail(job, exc.status_code, exc.detail)
         except Exception as exc:

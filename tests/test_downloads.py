@@ -186,3 +186,39 @@ def test_each_quality_download_keeps_its_own_headers(monkeypatch, client, wait_f
         (MEDIA_URL + "high", "high-agent"), (MEDIA_URL + "low", "low-agent"),
     ]
     assert all(headers["Referer"] == "https://www.douyin.com/" for _, headers in calls)
+
+
+def test_get_parse_redirect_downloads_first_video_highest_quality(monkeypatch, client):
+    variants = available_formats([
+        {"download_url": MEDIA_URL + "low", "width": 720, "height": 1280,
+         "default_download_headers": {"Referer": "https://www.douyin.com/", "User-Agent": "low-agent"}},
+        {"download_url": MEDIA_URL + "high", "width": 1080, "height": 1920,
+         "default_download_headers": {"Referer": "https://www.douyin.com/", "User-Agent": "high-agent"}},
+    ], "douyin")
+    monkeypatch.setattr(main, "_parse_blocking", lambda url: [main._result_item({
+        "source": "DouyinBrowser", "title": "快捷指令视频", "download_url": variants[0]["download_url"],
+        "formats": variants,
+    }), {"local_download_url": "/api/download/other"}])
+    calls = []
+    upstream = upstream_response(status=200)
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs["headers"]))
+        return upstream
+
+    monkeypatch.setattr(downloads.requests, "get", get)
+    response = client.get("/api/parse", params={
+        "text": "分享视频 https://v.douyin.com/abc/", "redirect": "true",
+    })
+    assert len(response.history) == 1
+    redirect = response.history[0]
+    assert redirect.status_code == 303
+    assert redirect.headers["location"].startswith("http://testserver/api/download/")
+    assert redirect.headers["cache-control"] == "no-store"
+    assert redirect.headers["referrer-policy"] == "no-referrer"
+    assert response.status_code == 200 and response.content == b"data"
+    assert response.headers["content-disposition"].startswith("attachment;")
+    assert calls[0][0] == MEDIA_URL + "high"
+    assert calls[0][1]["User-Agent"] == "high-agent"
+    assert calls[0][1]["Referer"] == "https://www.douyin.com/"
+    assert upstream.closed
