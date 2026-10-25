@@ -1,0 +1,10 @@
+Required Notice: Copyright (c) 2026 VideoDL API contributors
+
+本项目自有代码采用 PolyForm Noncommercial License 1.0.0，完整条款见 LICENSE。
+
+本项目依赖 CharlesPikachu/videodl（PyPI 包名 videofetch）。
+上游版权声明：Copyright (c) 2021–2026 CharlesPikachu
+上游项目：https://github.com/CharlesPikachu/videodl
+上游许可证：https://github.com/CharlesPikachu/videodl/blob/master/LICENSE
+
+第三方组件仍遵循各自的版权声明与许可证；本项目许可证不替代或改变其授权条款。

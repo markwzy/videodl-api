@@ -1,5 +1,7 @@
 FROM python:3.12-slim-bookworm
 
+LABEL org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -18,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && pip install -r /srv/requirements.txt \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
+# 镜像分发时也须携带许可和版权声明，不能只在源码仓库中保留。
+COPY LICENSE NOTICE /srv/
 COPY app /srv/app
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /srv/videodl_outputs \
