@@ -2,7 +2,9 @@ FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    BROWSER_PATH=/usr/bin/chromium \
+    BROWSER_NO_SANDBOX=1
 
 # 浏览器用于页面抓取兜底，媒体处理和脚本运行依赖供各站点解析器使用。
 RUN apt-get update && apt-get install -y --no-install-recommends \

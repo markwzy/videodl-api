@@ -1,8 +1,12 @@
-# VideoDL API (Mac + Docker)
+# VideoDL API
 
 基于 [CharlesPikachu/videodl](https://github.com/CharlesPikachu/videodl) / `videofetch==0.9.1`，并使用 `yt-dlp[default]==2026.10.21` 解析 X / Twitter、YouTube 和小红书。可以直接粘贴带文案的分享链接，返回视频标题、封面、媒体 URL、音频 URL 等。抖音、小红书、X 和 YouTube 支持通过本地服务流式下载到浏览器，**服务器不保存视频文件**。
 
 ## 1. 启动
+
+**Windows 服务器无需 Docker 或 WSL**：使用原生 Python，按 [Windows 部署说明](docs/windows.md) 安装依赖，然后运行 `install-windows.ps1` 和 `start-windows.ps1`。启动脚本固定使用单进程，默认只监听本机。
+
+### Docker 部署
 
 确保 Mac 上 Docker Desktop 已启动，并在本目录执行：
 

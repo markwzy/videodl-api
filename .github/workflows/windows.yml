@@ -1,0 +1,52 @@
+name: Windows 原生验证
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: 安装媒体工具
+        run: choco install ffmpeg --yes --no-progress
+      - name: 安装项目与测试依赖
+        shell: powershell
+        run: |
+          .\install-windows.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe -m pip install pytest httpx
+          exit $LASTEXITCODE
+      - name: 验证浏览器与真实音画合成
+        shell: powershell
+        env:
+          RUN_BROWSER_SMOKE: '1'
+          BROWSER_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
+        run: |
+          $env:PATH = "$PWD\.venv\Scripts;$env:PATH"
+          .\.venv\Scripts\python.exe -m pytest -q
+          exit $LASTEXITCODE
+      - name: 验证启动脚本与健康接口
+        shell: powershell
+        run: |
+          $server = Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PWD\start-windows.ps1`" -Port 18000" -PassThru
+          try {
+            $healthy = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              if ($server.HasExited) { throw "启动脚本提前退出。" }
+              try {
+                $result = Invoke-RestMethod http://127.0.0.1:18000/api/health -TimeoutSec 1
+                if ($result.status -eq "ok") { $healthy = $true; break }
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $healthy) { throw "健康检查超时。" }
+          } finally {
+            taskkill /PID $server.Id /T /F
+          }

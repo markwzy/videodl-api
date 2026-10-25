@@ -195,7 +195,7 @@ def _parse_blocking(url: str) -> list[dict]:
         client = VideoClient(allowed_video_sources=upstream_sources)
         # 直接启动系统浏览器，保留上游的媒体提取与校验逻辑。
         client.web_media_grabber = SystemMediaGrabber(
-            browser_path="/usr/bin/chromium", enable_scroll=False, browser_timeout_sec=15,
+            enable_scroll=False, browser_timeout_sec=15,
         )
         infos = client.parsefromurl(url) or []
         # 上游可能返回包含错误的非空列表，不能把列表非空当作解析成功。

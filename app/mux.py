@@ -1,4 +1,4 @@
-"""用受限管道合成音视频，媒体不落盘，合成进程不能自行访问网络。"""
+"""用本机管道合成音视频，媒体不落盘，合成进程不接收远程地址。"""
 
 import os
 import subprocess
@@ -17,25 +17,39 @@ class MuxStream:
         self._lock = Lock()
         self._closed = False
         self._writers = []
+        self._audio_pipe = None
         if not _slots.acquire(blocking=False):
             video.close()
             audio.close()
             raise HTTPException(status_code=503, detail="视频合成任务已满，请稍后下载", headers={"Retry-After": "5"})
         read_fd = write_fd = None
         try:
-            read_fd, write_fd = os.pipe()
+            process_options = {}
+            if os.name == "nt":
+                from .windows_pipe import WindowsPipe
+
+                self._audio_pipe = WindowsPipe()
+                # 文件协议只用于随机生成的本机管道；限定容器格式，不能解释外部播放列表。
+                audio_input = ["-protocol_whitelist", "file", "-f", "mov", "-seekable", "0", "-i", self._audio_pipe.path]
+                process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
+            else:
+                read_fd, write_fd = os.pipe()
+                audio_input = ["-protocol_whitelist", "pipe", "-i", f"pipe:{read_fd}"]
+                process_options["pass_fds"] = (read_fd,)
             self._process = subprocess.Popen([
                 "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
                 "-protocol_whitelist", "pipe", "-i", "pipe:0",
-                "-protocol_whitelist", "pipe", "-i", f"pipe:{read_fd}",
+                *audio_input,
                 "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
                 "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
                 "-f", "mp4", "pipe:1",
-            ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, pass_fds=(read_fd,))
-            os.close(read_fd)
-            read_fd = None
-            self._writers = [self._process.stdin, os.fdopen(write_fd, "wb")]
-            write_fd = None
+            ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **process_options)
+            if read_fd is not None:
+                os.close(read_fd)
+                read_fd = None
+                self._audio_pipe = os.fdopen(write_fd, "wb")
+                write_fd = None
+            self._writers = [self._process.stdin, self._audio_pipe]
             # 两条流必须并行喂入；管道背压限制内存，不能先把一条完整读完再处理另一条。
             for response, writer in zip(self._responses, self._writers):
                 Thread(target=self._pump, args=(response, writer), daemon=True).start()
@@ -87,6 +101,8 @@ class MuxStream:
                             self._process.kill()
                             self._process.wait()
                     self._process.stdout.close()
+                if self._audio_pipe is not None:
+                    self._audio_pipe.close()
                 for response in self._responses:
                     response.close()
             finally:

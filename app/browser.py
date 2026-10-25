@@ -1,7 +1,9 @@
-"""使用镜像内的浏览器，避免上游自动下载流程依赖特定处理器架构。"""
+"""复用系统浏览器和库的路径发现能力，避免解析时下载浏览器。"""
 
 from contextlib import contextmanager
 import logging
+import os
+from pathlib import Path
 from threading import Lock
 
 from DrissionPage import ChromiumOptions, ChromiumPage
@@ -13,7 +15,12 @@ class SystemMediaGrabber(WebMediaGrabber):
     def buildbrowserpage(self, request_overrides: dict | None = None):
         headers, cookies, other_kwargs = self.prepareheaderscookies(request_overrides=request_overrides)
         options = ChromiumOptions(read_file=False)
-        options.set_browser_path(self.browser_path)
+        # 显式路径配错时应立即报错，不能让库悄悄改用另一份浏览器。
+        browser_path = os.getenv("BROWSER_PATH", "").strip()
+        if browser_path:
+            if not Path(browser_path).is_file():
+                raise FileNotFoundError("BROWSER_PATH 必须指向已安装的浏览器可执行文件")
+            options.set_browser_path(browser_path)
         options.headless(self.browser_headless)
         options.set_load_mode(self.browser_load_mode)
         options.no_imgs(self.browser_disable_images)
@@ -22,8 +29,9 @@ class SystemMediaGrabber(WebMediaGrabber):
             page_load=self.browser_timeout_sec,
             script=self.browser_timeout_sec,
         )
-        # 容器禁止提权，浏览器无法启动自身沙箱；容器仍以普通用户运行。
-        options.set_argument('--no-sandbox')
+        # 禁用沙箱只适用于受容器限制的部署；原生服务器保留浏览器沙箱。
+        if os.getenv("BROWSER_NO_SANDBOX") == "1":
+            options.set_argument('--no-sandbox')
         # 每次启动使用独立端口和用户目录，避免接管其他浏览器或关闭别人的进程。
         options.auto_port()
         proxies = other_kwargs.get('proxies') or self._autosetproxies()
@@ -56,7 +64,7 @@ class DouyinBrowser:
             self._close_locked()
         if self._root is None:
             grabber = SystemMediaGrabber(
-                browser_path="/usr/bin/chromium", browser_timeout_sec=15,
+                browser_timeout_sec=15,
                 browser_disable_images=False,
             )
             self._headers = grabber.prepareheaderscookies()[0]
