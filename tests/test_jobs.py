@@ -181,3 +181,58 @@ def test_shutdown_discards_waiting_jobs_and_drains_running_threads():
         assert jobs.get(first["id"])["status"] == "succeeded"
 
     asyncio.run(scenario())
+
+
+def test_wait_cancellation_keeps_shared_job_running():
+    async def scenario():
+        release = Event()
+        calls = []
+
+        def parse(url):
+            calls.append(url)
+            assert release.wait(3)
+            return [{"download_url": url}]
+
+        jobs = ParseJobs(parse)
+        try:
+            task = jobs.submit("url", "browser", "key")
+            disconnected = asyncio.create_task(jobs.wait(task["id"]))
+            connected = asyncio.create_task(jobs.wait(task["id"]))
+            await asyncio.sleep(0)
+            disconnected.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await disconnected
+            assert jobs.submit("url", "browser", "key")["id"] == task["id"]
+            release.set()
+            result = await asyncio.wait_for(connected, 2)
+            assert result["success"] and calls == ["url"]
+            assert await jobs.wait(task["id"]) == result
+        finally:
+            release.set()
+            await jobs.close()
+
+    asyncio.run(scenario())
+
+
+def test_wait_reports_timeout_before_thread_exits():
+    async def scenario():
+        release = Event()
+
+        def parse(url):
+            assert release.wait(3)
+            return [{"download_url": url}]
+
+        jobs = ParseJobs(parse, parse_timeout=0.03, queue_timeout=0.06)
+        try:
+            running = jobs.submit("running", "browser", "running")
+            queued = jobs.submit("queued", "browser", "queued")
+            for task in (running, queued):
+                with pytest.raises(HTTPException) as timeout:
+                    await asyncio.wait_for(jobs.wait(task["id"]), 1)
+                assert timeout.value.status_code == 504
+            assert jobs._running["browser"] == 1
+        finally:
+            release.set()
+            await jobs.close()
+
+    asyncio.run(scenario())

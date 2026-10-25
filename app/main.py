@@ -14,8 +14,8 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from .downloads import create_download, router as downloads_router
@@ -228,8 +228,8 @@ def health():
     return {"status": "ok", "service": "videodl-api"}
 
 
-@app.post("/api/parse", status_code=202)
-async def parse(req: ParseRequest, request: Request, response: Response):
+def _submit_parse(req: ParseRequest, request: Request) -> dict:
+    # 两种提交入口共用校验、账号隔离和队列容量，不能因快捷指令绕过并发限制。
     url = extract_video_url(req.text)
     host = (urlsplit(url).hostname or "").lower().rstrip(".")
     platform = "twitter" if host in TWITTER_HOSTS else "youtube" if host in YOUTUBE_HOSTS else "rednote" if host in REDNOTE_HOSTS else "douyin" if host == "douyin.com" or host.endswith(".douyin.com") else "other"
@@ -241,10 +241,39 @@ async def parse(req: ParseRequest, request: Request, response: Response):
         except OSError:
             raise HTTPException(status_code=503, detail="无法读取 X 登录文件，请检查本机文件和只读挂载")
     key = (canonical_url(platform, url), os.getenv("VIDEO_SOURCES", DEFAULT_SOURCES), identity)
-    task = request.app.state.parse_jobs.submit(url, "api" if platform in {"twitter", "youtube", "rednote"} else "browser", key, req.request_id)
+    return request.app.state.parse_jobs.submit(url, "api" if platform in {"twitter", "youtube", "rednote"} else "browser", key, req.request_id)
+
+
+@app.post("/api/parse", status_code=202)
+async def parse(req: ParseRequest, request: Request, response: Response):
+    task = _submit_parse(req, request)
     response.headers["Cache-Control"] = "no-store"
     response.headers["Location"] = f'/api/tasks/{task["id"]}'
     return task
+
+
+@app.get("/api/parse", summary="解析分享文案，返回下载入口或跳转浏览器下载")
+async def parse_get(
+    request: Request, response: Response,
+    text: str = Query(min_length=1, max_length=8000, description="视频链接或完整分享文案，作为查询参数时须先进行网址编码"),
+    redirect: bool = Query(default=False, description="成功后跳转至第一条视频最高画质的本站下载入口"),
+):
+    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    response.headers.update(headers)
+    try:
+        task = _submit_parse(ParseRequest(text=text), request)
+        result = await request.app.state.parse_jobs.wait(task["id"])
+        local_url = result["items"][0].get("local_download_url")
+        # 分享文案可能带签名，重定向只指向本站凭证入口，不把原始媒体地址交给浏览器。
+        browser_url = str(request.base_url).rstrip("/") + local_url if local_url else None
+        if redirect:
+            if not local_url:
+                raise HTTPException(status_code=422, detail="该视频暂不支持浏览器直接下载，请使用解析页面查看媒体地址")
+            return RedirectResponse(browser_url, status_code=303, headers=headers)
+        return {**result, "browser_download_url": browser_url}
+    except HTTPException as exc:
+        # 错误同样禁止缓存，并保留队列满时的重试提示。
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers={**(exc.headers or {}), **headers}) from exc
 
 
 @app.get("/api/tasks/{task_id}")

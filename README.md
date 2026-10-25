@@ -22,6 +22,41 @@ docker compose up -d --build
 
 ## 2. 调用 API
 
+### iPhone 快捷指令与 GET 接口
+
+`GET /api/parse?text=<经过网址编码的链接或整段分享文案>` 等待解析完成后返回 HTTP 200 和解析结果，无需查询任务。与页面共用平台识别、账号隔离、有界队列、解析时限和下载凭证。
+
+```bash
+# 返回 JSON；使用 --data-urlencode 保留中文、加号和分享链接中的签名参数。
+curl -G 'http://localhost:8000/api/parse' \
+  --data-urlencode 'text=分享视频：https://v.douyin.com/abc123/'
+
+# 浏览器打开这个入口时，解析完成后自动跳转下载。
+curl -G 'http://localhost:8000/api/parse' \
+  --data-urlencode 'text=https://v.douyin.com/abc123/' \
+  --data-urlencode 'redirect=true' -D - -o /dev/null
+```
+
+默认 JSON 包含下文成功任务 `result` 中的全部字段，另有顶层 `browser_download_url`，例如 `http://你的服务地址:8000/api/download/<短期凭证>`。这是可直接交给“打开 URL”的完整下载地址，域名和协议来自本次请求；通过反向代理访问时，应正确转发外部域名、协议和路径前缀。`items[].local_download_url` 仍为本站相对路径。
+
+加上 `redirect=true`，成功时返回 HTTP 303，跳转至**第一条视频、最高可用画质**的本站下载入口。抖音、小红书、X 和 YouTube 当前支持这条下载链路；其他平台仍可返回解析 JSON，但 `browser_download_url` 为 `null`，请求跳转时返回 422，不会直接跳转到可能缺少请求头的原始媒体地址。下载凭证有效期为 10 分钟，服务器不保存视频。
+
+快捷指令可以按以下步骤配置：
+
+1. 新建“下载分享视频”，开启“在共享表单中显示”，接收“文本”和“URL”。从其他 App 分享给快捷指令的设置可参考 [Apple 官方说明](https://support.apple.com/zh-cn/guide/shortcuts/apd163eb9f95/ios)。
+2. 取“快捷指令输入”；如果没有输入，使用“获取剪贴板”。这样既能从分享菜单运行，也能复制抖音等平台的分享文案后手动运行。
+3. 对输入执行“URL 编码”。**只编码分享内容这一个参数值，编码一次**，不要编码整个接口地址，否则签名参数中的 `&`、`+`、`#` 等可能被误解。
+4. 添加“文本”，内容为 `http://你的服务地址:8000/api/parse?text=【URL 编码的结果】&redirect=true`，将方括号部分替换为前一步的变量。
+5. 添加“打开 URL”，传入这个文本。浏览器等待解析并进入下载流程；是否出现下载确认由浏览器设置决定，文件通过浏览器下载管理保存，不会自动进入照片图库。
+
+如果希望先取得 JSON，再打开下载地址，第 4 步不加 `redirect=true`，改用“获取 URL 内容”（GET），从响应中取 `browser_download_url`，非空时再“打开 URL”。这类操作可参考 [Apple 网络 API 使用说明](https://support.apple.com/zh-cn/guide/shortcuts/apd2d448b2de/ios)。不要用“获取 URL 内容”调用跳转模式，否则快捷指令可能直接接收整个视频，而不是交给浏览器下载。
+
+首次解析可能较慢，默认排队最多 30 秒、执行最多 90 秒；客户端或反向代理可能先超时，较慢平台也可沿用下文 POST 提交和任务查询。GET 失败返回 JSON 错误：输入无效或不支持直接下载为 422，队列满为 503（含 `Retry-After`），等待或解析超时为 504，解析器错误通常为 502。连接断开不会取消其他客户端共享的解析。GET 查询内容会进入浏览器历史和可能的访问日志，不要在文案中放入账号 Cookie。
+
+**iPhone 访问地址：**当前 Compose 仅绑定 Mac 的 `127.0.0.1`，手机上的 `localhost` 指向手机自身。若已通过受保护的服务地址访问页面，快捷指令使用同一地址即可。仅在可信家庭局域网内使用时，可将 `compose.yaml` 中的端口绑定改为 Mac 的具体局域网地址，例如 `"192.168.1.20:8000:8000"`（替换成实际地址），重新执行 `docker compose up -d`，并让手机与 Mac 连接同一网络。先在手机浏览器打开 `http://192.168.1.20:8000/api/health` 确认连通，再使用该地址配置快捷指令；不要为此开放路由器公网端口。默认绑定不会自动更改。
+
+### POST 提交与任务查询
+
 ```bash
 curl -X POST 'http://localhost:8000/api/parse' \
   -H 'Content-Type: application/json' \
