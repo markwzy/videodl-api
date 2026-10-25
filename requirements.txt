@@ -1,5 +1,5 @@
 fastapi==0.116.1
 uvicorn==0.35.0
 videofetch==0.9.1
-yt-dlp==2026.10.21
+yt-dlp[default]==2026.10.21
 cachetools==7.2.4

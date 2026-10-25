@@ -8,42 +8,48 @@ import os
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
-from urllib.parse import urlsplit
 
 from cachetools import cached
 from fastapi import HTTPException
 from yt_dlp import YoutubeDL
 from yt_dlp.cookies import CookieLoadError
-from yt_dlp.utils import DownloadError
+from yt_dlp.utils import DownloadError, float_or_none
 
+from .media import available_formats
 from .parse_cache import PARSE_CACHE, PARSE_CONDITION, canonical_url
 
 
 def _video_item(entry: dict) -> dict | None:
-    url = entry.get("url") or ""
-    parts = urlsplit(url)
-    # 本地下载只处理平台提供的独立媒体文件，不能把播放列表或外部链接当作成品视频。
-    if (
-        parts.scheme != "https" or parts.hostname != "video.twimg.com"
-        or parts.port not in (None, 443) or parts.username or parts.password
-        or entry.get("ext") != "mp4" or entry.get("protocol") != "https"
-    ):
+    candidates = []
+    for variant in [entry, *(entry.get("formats") or [])]:
+        # 提取器同时返回播放列表和音频轨，只列出能直接下载的视频文件。
+        if not isinstance(variant, dict) or variant.get("ext") != "mp4" or variant.get("protocol") != "https" or variant.get("vcodec") == "none":
+            continue
+        # 各档位单独处理请求头；账号凭证不能进入媒体请求或 API 响应。
+        headers = {
+            name: value for name, value in {**(entry.get("http_headers") or {}), **(variant.get("http_headers") or {})}.items()
+            if name.lower() in {"user-agent", "referer", "accept", "origin"} and isinstance(value, str)
+        }
+        if not any(name.lower() == "referer" for name in headers):
+            headers["Referer"] = "https://x.com/"
+        candidates.append({
+            "download_url": variant.get("url"), "width": variant.get("width"), "height": variant.get("height"),
+            "fps": variant.get("fps"), "bitrate": float_or_none(variant.get("tbr"), invscale=1000),
+            "filesize": variant.get("filesize"), "codec": variant.get("vcodec"),
+            "default_download_headers": headers,
+        })
+    formats = available_formats(candidates, "twitter")
+    if not formats:
         return None
-    # 账号凭证只用于 X 官方接口，不能随媒体请求头转发到内容分发域名。
-    headers = {
-        name: value for name, value in (entry.get("http_headers") or {}).items()
-        if name.lower() in {"user-agent", "referer", "accept", "origin"} and isinstance(value, str)
-    }
-    if not any(name.lower() == "referer" for name in headers):
-        headers["Referer"] = "https://x.com/"
     return {
         "source": "TwitterYtDlp",
         "identifier": str(entry.get("id") or ""),
         "title": entry.get("title") or "X 视频",
         "cover_url": entry.get("thumbnail"),
-        "download_url": url,
+        "download_url": formats[0]["download_url"],
         "ext": "mp4",
-        "default_download_headers": headers,
+        "default_download_headers": formats[0]["default_download_headers"],
+        "formats": formats,
     }
 
 

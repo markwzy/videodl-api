@@ -7,6 +7,9 @@ services:
       - "127.0.0.1:8000:8000"  # Access from your Mac ONLY; do not expose to the Internet
     environment:
       PARSE_TIMEOUT: "90"
+      # 两类解析分别限制等待数量，避免慢平台拖垮其他平台或积累无限队列。
+      PARSE_QUEUE_SIZE: "8"
+      PARSE_QUEUE_TIMEOUT: "30"
       # 默认只启用专用解析器；主动改为星号才会启用可能向第三方发送链接的通用解析器。
       VIDEO_SOURCES: "DouyinVideoClient,BilibiliVideoClient,RednoteVideoClient,KuaishouVideoClient,YouTubeVideoClient,WeiboVideoClient,XiguaVideoClient,ZhihuVideoClient,TencentVideoClient,YoukuVideoClient,TwitterVideoClient"
     shm_size: "256m"

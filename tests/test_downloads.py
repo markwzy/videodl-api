@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from app import downloads, main
+from app.media import available_formats
 
 
 client = TestClient(main.app)
@@ -123,6 +124,10 @@ def test_parse_result_only_exposes_ticket():
     item = main._result_item({
         "source": "DouyinBrowser", "title": "video", "download_url": MEDIA_URL,
         "default_download_headers": {"Referer": "https://www.douyin.com/", "User-Agent": "private-agent"},
+        "formats": available_formats([{
+            "download_url": MEDIA_URL, "width": 720, "height": 1280,
+            "default_download_headers": {"User-Agent": "private-agent"},
+        }], "douyin"),
     })
     assert item["local_download_url"].startswith("/api/download/")
     assert "default_download_headers" not in item
@@ -145,3 +150,39 @@ def test_redirect_cannot_cross_supported_platforms(monkeypatch):
     response = client.get(downloads.create_download(MEDIA_URL, "video", {}))
     assert response.status_code == 502
     assert upstream.closed
+
+
+def test_each_quality_download_keeps_its_own_headers(monkeypatch, client, wait_for_task):
+    # 页面切换的是各档位凭证；从解析响应走到下载接口，验证地址和请求头不会串档。
+    variants = available_formats([
+        {"download_url": MEDIA_URL + "high", "width": 1080, "height": 1920,
+         "default_download_headers": {"Referer": "https://www.douyin.com/", "User-Agent": "high-agent"}},
+        {"download_url": MEDIA_URL + "low", "width": 720, "height": 1280,
+         "default_download_headers": {"Referer": "https://www.douyin.com/", "User-Agent": "low-agent"}},
+    ], "douyin")
+    monkeypatch.setattr(main, "_parse_blocking", lambda url: [main._result_item({
+        "source": "DouyinBrowser", "title": "不同画质", "download_url": MEDIA_URL + "high",
+        "default_download_headers": variants[0]["default_download_headers"], "formats": variants,
+    })])
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs["headers"]))
+        return upstream_response(status=200)
+
+    monkeypatch.setattr(downloads.requests, "get", get)
+    response = client.post("/api/parse", json={"text": "https://www.douyin.com/video/123"})
+    assert response.status_code == 202
+    assert "high-agent" not in response.text and "low-agent" not in response.text
+    task = wait_for_task(client, response.json()["id"])
+    assert "high-agent" not in str(task) and "low-agent" not in str(task)
+    item = task["result"]["items"][0]
+    assert item["local_download_url"] == item["formats"][0]["local_download_url"]
+    paths = [format["local_download_url"] for format in item["formats"]]
+    assert len(set(paths)) == 2
+    for path in paths:
+        assert client.get(path).content == b"data"
+    assert [(url, headers["User-Agent"]) for url, headers in calls] == [
+        (MEDIA_URL + "high", "high-agent"), (MEDIA_URL + "low", "low-agent"),
+    ]
+    assert all(headers["Referer"] == "https://www.douyin.com/" for _, headers in calls)

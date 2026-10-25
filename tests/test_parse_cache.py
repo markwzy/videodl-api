@@ -1,6 +1,5 @@
 """验证缓存新鲜度、账号隔离及平台之间的排队隔离。"""
 
-from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from types import SimpleNamespace
 
@@ -106,7 +105,7 @@ def test_video_index_is_part_of_x_cache_identity():
     )
 
 
-def test_x_does_not_wait_for_busy_browser(monkeypatch):
+def test_x_does_not_wait_for_busy_browser(monkeypatch, wait_for_task):
     browser_started = Event()
     release_browser = Event()
 
@@ -118,13 +117,15 @@ def test_x_does_not_wait_for_busy_browser(monkeypatch):
         return [{"download_url": "https://cdn.example.org/video.mp4"}]
 
     monkeypatch.setattr(main, "_parse_blocking", parse)
-    with TestClient(main.app) as client, ThreadPoolExecutor(max_workers=1) as callers:
-        browser_call = callers.submit(client.post, "/api/parse", json={"text": "https://www.douyin.com/video/123"})
+    with TestClient(main.app) as client:
+        browser_call = client.post("/api/parse", json={"text": "https://www.douyin.com/video/123"})
         try:
+            assert browser_call.status_code == 202
             assert browser_started.wait(timeout=2)
             response = client.post("/api/parse", json={"text": X_URL})
-            assert response.status_code == 200
-            assert not browser_call.done()
+            assert response.status_code == 202
+            assert wait_for_task(client, response.json()["id"])["status"] == "succeeded"
+            assert client.get(f'/api/tasks/{browser_call.json()["id"]}').json()["status"] == "running"
         finally:
             release_browser.set()
-        assert browser_call.result(timeout=2).status_code == 200
+        assert wait_for_task(client, browser_call.json()["id"])["status"] == "succeeded"

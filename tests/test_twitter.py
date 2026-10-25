@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 import pytest
 from yt_dlp.cookies import CookieLoadError
 from yt_dlp.utils import DownloadError
@@ -62,6 +61,22 @@ def test_native_video_does_not_expose_account_headers():
     assert item["default_download_headers"] == {"User-Agent": "test-agent", "Referer": "https://x.com/"}
     assert "fake-cookie" not in str(item)
     assert "fake-auth" not in str(item)
+
+
+def test_x_lists_progressive_variants_without_hls_audio_or_credentials():
+    entry = media_entry()
+    entry["formats"] = [
+        {"url": MEDIA_URL, "ext": "mp4", "protocol": "https", "width": 1280, "height": 720, "tbr": 2000},
+        {"url": "https://video.twimg.com/low.mp4", "ext": "mp4", "protocol": "https", "width": 640, "height": 360,
+         "http_headers": {"Cookie": "variant-secret", "Authorization": "variant-token"}},
+        {"url": "https://video.twimg.com/audio.mp4", "ext": "mp4", "protocol": "https", "vcodec": "none"},
+        {"url": "https://video.twimg.com/master.m3u8", "ext": "mp4", "protocol": "m3u8_native", "width": 1920, "height": 1080},
+    ]
+    item = twitter._video_item(entry)
+    # 选中的默认格式可能没有尺寸，和已知版本重复时也不能多出一个“未知”档位。
+    assert [variant["width"] for variant in item["formats"]] == [1280, 640]
+    assert "variant-secret" not in str(item) and "variant-token" not in str(item)
+    assert item["download_url"] == MEDIA_URL
 
 
 @pytest.mark.parametrize("changes", [
@@ -137,11 +152,12 @@ def test_only_x_does_not_enable_all_upstream_sources(monkeypatch):
     assert main._parse_blocking("https://www.bilibili.com/video/BV123") == []
 
 
-def test_platform_login_error_survives_api_boundary(monkeypatch):
+def test_platform_login_error_survives_api_boundary(monkeypatch, client, wait_for_task):
     def parse(url):
         raise HTTPException(status_code=403, detail="需要有效的 X 登录文件")
 
     monkeypatch.setattr(main, "_parse_blocking", parse)
-    response = TestClient(main.app).post("/api/parse", json={"text": "https://x.com/user/status/123"})
-    assert response.status_code == 403
-    assert response.json()["detail"] == "需要有效的 X 登录文件"
+    response = client.post("/api/parse", json={"text": "https://x.com/user/status/123"})
+    assert response.status_code == 202
+    error = wait_for_task(client, response.json()["id"])["error"]
+    assert error == {"status_code": 403, "detail": "需要有效的 X 登录文件"}

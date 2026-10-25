@@ -2,7 +2,7 @@
 
 import re
 from threading import Condition
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from cachetools import TTLCache
 
@@ -21,6 +21,13 @@ PARSE_CONDITION = Condition()
 
 def canonical_url(platform: str, url: str) -> str:
     parts = urlsplit(url)
+    if platform == "youtube":
+        # 分享参数和播放列表不改变目标视频，短链与完整链接应共享同一次解析。
+        video_id = parts.path.strip("/") if parts.hostname == "youtu.be" else parse_qs(parts.query).get("v", [""])[0]
+        if not video_id and (match := re.fullmatch(r"/(?:shorts|embed|live)/([A-Za-z0-9_-]{11})/?", parts.path)):
+            video_id = match.group(1)
+        if re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            return f"https://www.youtube.com/watch?v={video_id}"
     if platform == "twitter":
         # 保留视频序号，只去掉分享追踪参数并统一域名，避免不同视频误用同一结果。
         return parts._replace(scheme="https", netloc="x.com", query="", fragment="").geturl()
