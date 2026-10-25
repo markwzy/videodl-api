@@ -70,6 +70,16 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health
 
 环境变量在启动前设置；`compose.yaml` 与 `compose.override.yaml` 在原生运行时不会被读取。
 
+启动脚本会自动加载项目目录中的 `.secrets\x-cookies.txt`，无需额外设置。启动时显示“已配置登录文件”表示文件存在、可读，并已传给服务；不会检查或打印 Cookie 内容，也不代表平台仍认可该会话。文件不存在且未显式指定路径时显示“匿名模式”。
+
+使用其他文件时，可以通过参数显式指定：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-windows.ps1 -XCookiesFile "D:\private\x-cookies.txt"
+```
+
+优先使用 `-XCookiesFile` 参数，其次使用 `X_COOKIES_FILE` 环境变量；两者均未指定时才查找项目默认文件。显式指定的文件不存在或不可读时停止启动，不会静默匿名访问。相对路径按项目目录解析。修改配置后需重启原来运行的服务，不能只在另一个终端设置变量。
+
 ```powershell
 $env:PARSE_TIMEOUT = "90"
 $env:PARSE_QUEUE_SIZE = "8"
@@ -78,7 +88,7 @@ $env:X_COOKIES_FILE = "C:\videodl-api\.secrets\x-cookies.txt"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-windows.ps1
 ```
 
-未设置 `X_COOKIES_FILE` 时匿名访问 X。登录文件必须为 Netscape 格式，并使用 Windows 文件权限限制为运行账户可读；不要提交到仓库。解析器使用独立临时副本，不修改原件。
+未提供任何登录文件时匿名访问 X。登录文件必须为 Netscape 格式，并使用 Windows 文件权限限制为运行账户可读；不要提交到仓库。解析器使用独立临时副本，不修改原件。
 
 `BROWSER_PATH` 也可以通过环境变量指定。路径必须是实际的浏览器可执行文件，配错会报错，不会静默换用其他浏览器。原生部署保留浏览器沙箱，不设置 `BROWSER_NO_SANDBOX`；该开关由 Docker 镜像单独启用。
 

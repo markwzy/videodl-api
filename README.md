@@ -93,7 +93,9 @@ docker compose down         # 停止并删除容器（保留镜像）
 
 ### X 登录文件
 
-未设置 `X_COOKIES_FILE` 时以匿名方式解析。需要登录的推文，可将有权访问该内容的账号导出为 Netscape 格式的 `cookies.txt`，保存在本机 `.secrets/x-cookies.txt`，通过本机专用的 `compose.override.yaml` 挂载：
+Windows 启动脚本自动读取项目目录中的 `.secrets/x-cookies.txt`，也可通过 `-XCookiesFile` 参数或 `X_COOKIES_FILE` 环境变量指定，详见 [Windows 部署说明](docs/windows.md)。未提供文件时匿名解析。
+
+Docker 部署未设置 `X_COOKIES_FILE` 时以匿名方式解析。需要登录的推文，可将有权访问该内容的账号导出为 Netscape 格式的 `cookies.txt`，保存在本机 `.secrets/x-cookies.txt`，通过本机专用的 `compose.override.yaml` 挂载：
 
 ```yaml
 services:
